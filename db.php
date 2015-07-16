@@ -3,7 +3,7 @@
    determine which section of php should be run, using:
    db.php?which=quiz  or db.php?which=breakup  or db.php?which=results 
    */
-   $arg1 = $_GET['which'];
+   $arg1 = $_REQUEST['which'];
    
    /*super-basic boilerplate connection code*/
    $mysqli = new mysqli("localhost", "root", "", "sonifydb");
@@ -20,7 +20,7 @@
    $val: a random number from 1 to 25 inclusive
    $rInd: random number from 0 to $songRes->num_rows-1 to select from multiple
       matches
-   $songRes: currently used both for single song selection and breakup song 
+   $songRes: used both for single song selection and breakup song 
       selection
    $quiz: 8 randomly-selected rows for quiz questions
    $breakup: 5 randomly-selected rows for breakup questions
@@ -87,11 +87,16 @@
       $results = array();/*single root key for valid JSON*/
       $resultArr = array();/*includes key-value pairs for sonify, album, mood, and breakup song as well as a playlist array*/
       $playlist = array();//playlist songs
-      
-      
+      $trendingToday = array();//trending for just a single day (today)
+      $trendingForever = array();
+      $trendingWeek = array();
+      $trendingMonth = array();
+      $trending = array();
+     
       
       $val = rand(1, 25);
       $resultArr['mood']=$val;
+      
       //need to translate this numeric value into a valid mood
       
       $i = 0;
@@ -190,13 +195,13 @@
          $resultArr["sonify"] = $row['songtitle'];
       }
       else{
-         $songRes = $mysqli->query("SELECT * FROM ts_songs WHERE isBreakup = 'TRUE' ORDER BY ABS(score - $val) LIMIT 5");
+         $breakRes = $mysqli->query("SELECT * FROM ts_songs WHERE isBreakup = 'TRUE' ORDER BY ABS(score - $val) LIMIT 5");
          /*check if there are equivalent closest match values and count how many occur*/
          $rInd = 1; 
-         $songRes->data_seek(0);
+         $breakRes->data_seek(0);
          $comparisonRow = $songRes->fetch_assoc();
-         $songRes->data_seek(1);
-         while($row = $songRes->fetch_assoc()){
+         $breakRes->data_seek(1);
+         while($row = $breakRes->fetch_assoc()){
             if($row['score'] == $comparisonRow['score']){
                $rInd++;
             }
@@ -213,15 +218,15 @@
            // }
             //echo "</ul>";*/
             $rInd = rand(0, $rInd-1); 
-            $songRes->data_seek($rInd);
-            $row = $songRes->fetch_assoc();
+            $breakRes->data_seek($rInd);
+            $row = $breakRes->fetch_assoc();
             //echo "Selection chose breakup song: ". $row['songtitle']. "\n   <strong> " . $row['score'] . "</strong><br>\n";
              $resultArr["breakup"] = $row['songtitle'];
          }
          else{
             /*If all 'closest matches' are unique, grab the closest, at row index 0*/
-            $songRes->data_seek(0);
-            $row = $songRes->fetch_assoc();
+            $breakRes->data_seek(0);
+            $row = $breakRes->fetch_assoc();
            // echo "Your breakup song is: ". $row['songtitle']. "\n   <strong> " . $row['score'] . "</strong><br>\n";
             $resultArr["breakup"] = $row['songtitle'];
          }
@@ -236,11 +241,60 @@
       $row = $albRes->fetch_assoc();
       $resultArr['album'] = $row['album'];
      /* echo "Your Swift Gen match: ". $row['album']. "\n   <strong> " . $row['score'] . "</strong>\n";*/
-     $results['results']= $resultArr;
+     
+     
+    
+    
+    
+      /* now for the trending things...*/
+      $date = getdate();
+      $delim = "_";
+      $today = "d".$delim.$date['year'].$delim.$date['mon'].$delim.$date['mday'];
+      
+     // echo $today;
+      $findCol = $mysqli->query("SELECT ".$today.' FROM ts_songs');
+      if(!$findCol){ 
+         $mysqli->query("ALTER TABLE ts_songs ADD COLUMN $today INT DEFAULT 0");
+      //echo $today.' has been added to the db';
+     }
+     
+     //else {echo $today.' is already in the db';}
+      $trends= $mysqli->query("SELECT * FROM ts_songs WHERE songtitle='".$resultArr['sonify']."'");
+    
+      $row = $trends->fetch_assoc();
+      $trendCount = $row[$today];
+      //echo $trendCount;
+      $trendCount+=1;
+      $sonifyTotal = $row['sonifytotal'];
+      $sonifyTotal += 1;
+      $mysqli->query("UPDATE ts_songs SET $today=$trendCount WHERE songtitle='".$resultArr['sonify']."'");
+       $mysqli->query("UPDATE ts_songs SET sonifytotal=$sonifyTotal WHERE songtitle='".$resultArr['sonify']."'");
+      //lets get the top five
+      $i = 0;
+      $trendRes = $mysqli->query("SELECT * FROM ts_songs ORDER BY $today DESC LIMIT 5");
+      /*spit out top five songs without accounting for duplicate trending values*/
+      while ($row = $trendRes->fetch_assoc()) {
+         $trendingToday[$i] = $row['songtitle'];
+         
+        $i++;
+      }
+      $i = 0;
+      $trendRes = $mysqli->query("SELECT * FROM ts_songs ORDER BY sonifytotal DESC LIMIT 5");
+      /*spit out top five songs without accounting for duplicate trending values*/
+      while ($row = $trendRes->fetch_assoc()) {
+         $trendingForever[$i] = $row['songtitle'];
+        $i++;
+      }
+     
+      $trending['today']= $trendingToday;
+      $trending['forever'] = $trendingForever;
+      $resultArr['trending']=$trending;
+      $results['results']= $resultArr;
       echo "\n".json_encode( $results, JSON_PRETTY_PRINT);
       break;
       default:
          trigger_error("Something went wrong...");
          die;
    }
+   $mysqli->close();
    ?>
